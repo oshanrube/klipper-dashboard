@@ -382,7 +382,7 @@ class KlipperDashboard {
         const hostMappings = {
             '10.0.68.108': '/api/printer1-7125',
             '10.0.68.121': '/api/printer2-7125',
-            '10.0.68.210': '/api/printer3-7125'
+            '10.0.68.130': '/api/printer3-7125'
         };
 
         // Use specific mapping if known; otherwise use the generic 7125 proxy
