@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  klipper-dashboard:
+    build: .
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    container_name: klipper-dashboard
+    environment:
+      - TZ=UTC
+    volumes:
+      # Optional: Mount log directory for debugging
+      - ./logs:/var/log/caddy
+    networks:
+      - klipper-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  klipper-network:
+    driver: bridge

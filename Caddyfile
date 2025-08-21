@@ -1,0 +1,88 @@
+:80 {
+    # Serve static files from /srv directory
+    root * /srv
+    file_server
+    
+    # Enable CORS for all responses
+    header {
+        Access-Control-Allow-Origin *
+        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+    }
+    
+    # Proxy API requests to printer 1 (port 4408)
+    handle /api/printer1/* {
+        reverse_proxy http://10.0.68.108:4408 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    
+    # Proxy API requests to printer 2 (port 4408)
+    handle /api/printer2/* {
+        reverse_proxy http://10.0.68.121:4408 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    
+    # Proxy API requests to printer 3 (port 4408)
+    handle /api/printer3/* {
+        reverse_proxy http://10.0.68.130:4408 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    
+    # Moonraker API (port 7125) for known printers
+    handle /api/printer1-7125/* {
+        uri strip_prefix /api/printer1-7125
+        reverse_proxy http://10.0.68.108:7125 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    handle /api/printer2-7125/* {
+        uri strip_prefix /api/printer2-7125
+        reverse_proxy http://10.0.68.121:7125 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    handle /api/printer3-7125/* {
+        uri strip_prefix /api/printer3-7125
+        reverse_proxy http://10.0.68.130:7125 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    
+    # Generic proxy for any printer (format: /api/proxy/IP:PORT/endpoint)
+    handle /api/proxy/* {
+        uri strip_prefix /api/proxy
+        reverse_proxy * {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # Generic proxy for Moonraker (port 7125) (format: /api/proxy7125/HOST:PORT/endpoint)
+    handle /api/proxy7125/* {
+        uri strip_prefix /api/proxy7125
+        reverse_proxy * {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    
+    # Handle preflight OPTIONS requests
+    @options {
+        method OPTIONS
+    }
+    respond @options 204
+    
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+    }
+}
