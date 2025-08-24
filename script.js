@@ -52,9 +52,11 @@ class KlipperDashboard {
         if (this.printers.length === 0) {
             // Add default printers from the issue description
             const defaultPrinters = [
-                { id: 1, name: 'Printer 1', ip: '10.0.68.108:4408', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
-                { id: 2, name: 'Printer 2', ip: '10.0.68.121:4408', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
-                { id: 3, name: 'Printer 3', ip: '10.0.68.130:4408', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false }
+                { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108:4408', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
+                { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130:4408', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false },
+                { id: 3, name: 'Nami', ip: '10.0.68.121:4408', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
+                { id: 4, name: 'Usopp', ip: '10.0.68.117:4408', webcamUrl: 'http://10.0.68.117:4408/webcam/?action=stream', disabled: false },
+                { id: 5, name: 'Sanji', ip: '10.0.68.124:4408', webcamUrl: 'http://10.0.68.124:4408/webcam/?action=stream', disabled: false }
             ];
             this.printers = defaultPrinters;
             this.savePrinters();
@@ -62,16 +64,6 @@ class KlipperDashboard {
     }
 
     init() {
-/* <<<<<<<<<<<<<<  ✨ Windsurf Command ⭐ >>>>>>>>>>>>>>>> */
-    /**
-     * Initialize the dashboard.
-     *
-     * This function is called when the script is loaded. It sets up all event
-     * listeners, requests permission for desktop notifications, renders the
-     * printer cards, and starts the polling loop. It also sets the poll
-     * interval input value to the configured value.
-     */
-/* <<<<<<<<<<  d6421e81-fb9f-4af6-99a7-3eed0e9cc0aa  >>>>>>>>>>> */
         this.setupEventListeners();
         this.requestNotificationPermission();
         this.renderPrinters();
@@ -349,21 +341,6 @@ class KlipperDashboard {
         }
     }
 
-    getProxyEndpoint(printerIp) {
-        // Remove http:// prefix if present
-        const cleanIp = printerIp.replace(/^https?:\/\//, '');
-        
-        // Map known IPs to specific proxy endpoints
-        const ipMappings = {
-            '10.0.68.108:4408': '/api/printer1',
-            '10.0.68.121:4408': '/api/printer2',
-            '10.0.68.130:4408': '/api/printer3'
-        };
-        
-        // Return specific mapping if available, otherwise use generic proxy
-        return ipMappings[cleanIp] || `/api/proxy/${cleanIp}`;
-    }
-
     getHostFromIp(ip) {
         try {
             const clean = String(ip).replace(/^https?:\/\//, '');
@@ -378,15 +355,8 @@ class KlipperDashboard {
         // Derive host from stored ip (which might include a different port like 4408)
         const host = this.getHostFromIp(printerIp);
 
-        // Known host mappings to port-7125 proxies
-        const hostMappings = {
-            '10.0.68.108': '/api/printer1-7125',
-            '10.0.68.121': '/api/printer2-7125',
-            '10.0.68.130': '/api/printer3-7125'
-        };
-
         // Use specific mapping if known; otherwise use the generic 7125 proxy
-        return hostMappings[host] || `/api/proxy7125/${host}:7125`;
+        return `/api/proxy/${host}:7125`;
     }
 
     async updatePrinterStatus(printer) {
