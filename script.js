@@ -344,7 +344,8 @@ class KlipperDashboard {
                             print_stats: null,
                             heater_bed: null,
                             extruder: null,
-                            display_status: null
+                            display_status: null,
+                            virtual_sdcard: null,
                         }
                     },
                     id: Date.now()
@@ -419,45 +420,44 @@ class KlipperDashboard {
     handleStatusUpdate(printer, statusData) {
         // Update status based on received data
         let currentState = 'idle';
-        let progress = 0;
-        
+
         const printStats = statusData.print_stats;
         const displayStatus = statusData.display_status;
+        const virtualSdcard = statusData.virtual_sdcard;
         const heaterBed = statusData.heater_bed;
         const extruder = statusData.extruder;
         
         if (printStats) {
             currentState = printStats.state || 'idle';
             
-            // Calculate progress based on print_duration / total_duration
-            if (printStats.print_duration && printStats.total_duration) {
-                progress = printStats.print_duration / printStats.total_duration;
-            } else {
-                // Fallback to display status progress if duration data unavailable
-                progress = displayStatus?.progress || 0;
+            // Use virtual_sdcard.progress for more accurate progress calculation
+            if (virtualSdcard && virtualSdcard.progress !== undefined) {
+                const progress = virtualSdcard.progress;
+              document.getElementById(`progress-${printer.id}`).textContent =
+                `${Math.round(progress * 100)}%`;
+              document.getElementById(`progress-bar-${printer.id}`).style.width =
+                `${progress * 100}%`;
+              if (printStats.total_duration && progress > 0) {
+                const remaining = printStats.total_duration * (1 - progress);
+                const eta = new Date(Date.now() + remaining * 1000);
+                document.getElementById(`eta-${printer.id}`).textContent =
+                  eta.toLocaleTimeString();
+              } else {
+                document.getElementById(`eta-${printer.id}`).textContent = '-';
+              }
             }
             
             // Update print information
             document.getElementById(`file-${printer.id}`).textContent = 
                 printStats.filename || '-';
-            document.getElementById(`progress-${printer.id}`).textContent = 
-                `${Math.round(progress * 100)}%`;
-            document.getElementById(`progress-bar-${printer.id}`).style.width = 
-                `${progress * 100}%`;
+
             
             if (printStats.print_duration) {
                 const printTime = this.formatTime(printStats.print_duration);
                 document.getElementById(`print-time-${printer.id}`).textContent = printTime;
             }
             
-            if (printStats.total_duration && progress > 0) {
-                const remaining = printStats.total_duration * (1 - progress);
-                const eta = new Date(Date.now() + remaining * 1000);
-                document.getElementById(`eta-${printer.id}`).textContent = 
-                    eta.toLocaleTimeString();
-            } else {
-                document.getElementById(`eta-${printer.id}`).textContent = '-';
-            }
+
         }
         
         // Update temperatures
