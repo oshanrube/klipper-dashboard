@@ -5,6 +5,8 @@ class KlipperDashboard {
         this.pollTimer = null;
         this.previousStates = new Map();
         this.notificationsEnabled = false;
+        this.websockets = new Map(); // Store WebSocket connections for each printer
+        this.reconnectTimers = new Map(); // Store reconnection timers
         
         // Migrate any legacy data formats/URLs before proceeding
         this.migrateLegacyWebcamUrls();
@@ -67,7 +69,7 @@ class KlipperDashboard {
         this.setupEventListeners();
         this.requestNotificationPermission();
         this.renderPrinters();
-        this.startPolling();
+        this.startWebSocketConnections();
         
         // Set poll interval input value
         document.getElementById('pollInterval').value = this.pollInterval;
@@ -210,7 +212,7 @@ class KlipperDashboard {
         if (newInterval && newInterval > 0) {
             this.pollInterval = newInterval;
             localStorage.setItem('pollInterval', this.pollInterval.toString());
-            this.restartPolling();
+            this.restartWebSocketConnections();
             alert('Settings saved successfully!');
         }
     }
@@ -225,6 +227,25 @@ class KlipperDashboard {
         const wasDisabled = !!this.printers[idx].disabled;
         this.printers[idx].disabled = !wasDisabled;
         this.savePrinters();
+        
+        // Handle WebSocket connection for toggled printer
+        if (this.printers[idx].disabled) {
+            // Disconnect WebSocket if printer is being disabled
+            const ws = this.websockets.get(id);
+            if (ws) {
+                ws.close();
+            }
+            // Clear reconnection timer
+            const timer = this.reconnectTimers.get(id);
+            if (timer) {
+                clearTimeout(timer);
+                this.reconnectTimers.delete(id);
+            }
+        } else {
+            // Connect WebSocket if printer is being enabled
+            this.connectWebSocket(this.printers[idx]);
+        }
+        
         // Re-render the card UI and refresh statuses
         this.renderPrinters();
     }
@@ -249,7 +270,7 @@ class KlipperDashboard {
             <button class="remove-printer" onclick="dashboard.removePrinter(${printer.id})" title="Remove Printer">×</button>
             <button class="disable-printer" onclick="dashboard.togglePrinterDisabled(${printer.id})" title="${printer.disabled ? 'Enable' : 'Disable'} Printer">${printer.disabled ? '⏻' : '⏸'}</button>
             <div class="printer-header">
-                <div class="printer-name">${printer.name}</div>
+                <div class="printer-name">${printer.name} <span class="printer-ip">(${printer.ip.replace(/^https?:\/\//, '')})</span></div>
                 <div class="printer-status">
                     <span class="status-indicator ${printer.disabled ? 'status-disabled' : 'status-offline'}" id="status-${printer.id}"></span>
                     <span id="status-text-${printer.id}">${printer.disabled ? 'Disabled' : 'Offline'}</span>
@@ -300,45 +321,202 @@ class KlipperDashboard {
         return card;
     }
 
-    async fetchPrinterStatus(printer) {
-        try {
-            if (printer.disabled) {
-                return { online: false, disabled: true };
-            }
-            // Use Moonraker (port 7125) for API queries
-            const apiEndpoint = this.getMoonrakerProxyEndpoint(printer.ip);
-            
-            // Fetch print status specifically from Moonraker (single source of truth)
-            const printResponse = await fetch(`${apiEndpoint}/printer/objects/query?print_stats&heater_bed&extruder&display_status`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
-
-            if (!printResponse.ok) {
-                throw new Error('Printer offline');
-            }
-
-            const printData = await printResponse.json();
-
-            return {
-                online: true,
-                print: printData
-            };
-        } catch (error) {
-            const msg = String(error && error.message ? error.message : '').toLowerCase();
-            if (msg !== 'printer offline') {
-                console.error(`Error fetching status for ${printer.name}:`, error);
-            } else {
-                // Suppress expected offline errors to keep console clean
-                if (typeof window !== 'undefined' && window.DEBUG_DASHBOARD) {
-                    console.debug(`Printer ${printer.name} is offline (suppressed log).`);
-                }
-            }
-            return {
-                online: false,
-                error: error.message
-            };
+    connectWebSocket(printer) {
+        if (printer.disabled) {
+            return;
         }
+
+        const host = this.getHostFromIp(printer.ip);
+        const wsUrl = `ws://${host}:7125/websocket`;
+        
+        try {
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log(`WebSocket connected to ${printer.name}`);
+                
+                // Subscribe to printer objects
+                const subscribeMessage = {
+                    jsonrpc: '2.0',
+                    method: 'printer.objects.subscribe',
+                    params: {
+                        objects: {
+                            print_stats: null,
+                            heater_bed: null,
+                            extruder: null,
+                            display_status: null
+                        }
+                    },
+                    id: Date.now()
+                };
+                
+                ws.send(JSON.stringify(subscribeMessage));
+                
+                // Clear any existing reconnect timer
+                const reconnectTimer = this.reconnectTimers.get(printer.id);
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                    this.reconnectTimers.delete(printer.id);
+                }
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // Handle subscription updates
+                    if (data.method === 'notify_status_update' && data.params) {
+                        this.handleStatusUpdate(printer, data.params[0]);
+                    }
+                } catch (error) {
+                    console.error(`Error parsing WebSocket message for ${printer.name}:`, error);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log(`WebSocket disconnected from ${printer.name}`);
+                this.websockets.delete(printer.id);
+                this.updatePrinterOfflineStatus(printer);
+                
+                // Schedule reconnection if printer is not disabled
+                if (!printer.disabled) {
+                    this.scheduleReconnect(printer);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error(`WebSocket error for ${printer.name}:`, error);
+                this.updatePrinterOfflineStatus(printer);
+            };
+            
+            this.websockets.set(printer.id, ws);
+            
+        } catch (error) {
+            console.error(`Failed to create WebSocket for ${printer.name}:`, error);
+            this.updatePrinterOfflineStatus(printer);
+            this.scheduleReconnect(printer);
+        }
+    }
+
+    scheduleReconnect(printer) {
+        // Clear existing timer
+        const existingTimer = this.reconnectTimers.get(printer.id);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+        }
+        
+        // Schedule reconnection in 5 seconds
+        const timer = setTimeout(() => {
+            if (!printer.disabled) {
+                this.connectWebSocket(printer);
+            }
+            this.reconnectTimers.delete(printer.id);
+        }, 5000);
+        
+        this.reconnectTimers.set(printer.id, timer);
+    }
+
+    handleStatusUpdate(printer, statusData) {
+        // Update status based on received data
+        let currentState = 'idle';
+        let progress = 0;
+        
+        const printStats = statusData.print_stats;
+        const displayStatus = statusData.display_status;
+        const heaterBed = statusData.heater_bed;
+        const extruder = statusData.extruder;
+        
+        if (printStats) {
+            currentState = printStats.state || 'idle';
+            
+            // Calculate progress based on print_duration / total_duration
+            if (printStats.print_duration && printStats.total_duration) {
+                progress = printStats.print_duration / printStats.total_duration;
+            } else {
+                // Fallback to display status progress if duration data unavailable
+                progress = displayStatus?.progress || 0;
+            }
+            
+            // Update print information
+            document.getElementById(`file-${printer.id}`).textContent = 
+                printStats.filename || '-';
+            document.getElementById(`progress-${printer.id}`).textContent = 
+                `${Math.round(progress * 100)}%`;
+            document.getElementById(`progress-bar-${printer.id}`).style.width = 
+                `${progress * 100}%`;
+            
+            if (printStats.print_duration) {
+                const printTime = this.formatTime(printStats.print_duration);
+                document.getElementById(`print-time-${printer.id}`).textContent = printTime;
+            }
+            
+            if (printStats.total_duration && progress > 0) {
+                const remaining = printStats.total_duration * (1 - progress);
+                const eta = new Date(Date.now() + remaining * 1000);
+                document.getElementById(`eta-${printer.id}`).textContent = 
+                    eta.toLocaleTimeString();
+            } else {
+                document.getElementById(`eta-${printer.id}`).textContent = '-';
+            }
+        }
+        
+        // Update temperatures
+        if (heaterBed) {
+            document.getElementById(`bed-temp-${printer.id}`).textContent = 
+                `${Math.round(heaterBed.temperature)}°C / ${Math.round(heaterBed.target)}°C`;
+        }
+        
+        if (extruder) {
+            document.getElementById(`extruder-temp-${printer.id}`).textContent = 
+                `${Math.round(extruder.temperature)}°C / ${Math.round(extruder.target)}°C`;
+        }
+        
+        // Update status indicator and text
+        const statusIndicator = document.getElementById(`status-${printer.id}`);
+        const statusText = document.getElementById(`status-text-${printer.id}`);
+        
+        if (statusIndicator && statusText) {
+            switch (currentState) {
+                case 'printing':
+                    statusIndicator.className = 'status-indicator status-printing';
+                    statusText.textContent = 'Printing';
+                    break;
+                case 'complete':
+                    statusIndicator.className = 'status-indicator status-complete';
+                    statusText.textContent = 'Complete';
+                    this.checkForPrintCompletion(printer, currentState);
+                    break;
+                case 'paused':
+                    statusIndicator.className = 'status-indicator status-printing';
+                    statusText.textContent = 'Paused';
+                    break;
+                default:
+                    statusIndicator.className = 'status-indicator status-online';
+                    statusText.textContent = 'Ready';
+            }
+        }
+    }
+
+    updatePrinterOfflineStatus(printer) {
+        const statusIndicator = document.getElementById(`status-${printer.id}`);
+        const statusText = document.getElementById(`status-text-${printer.id}`);
+        
+        if (statusIndicator && statusText) {
+            if (printer.disabled) {
+                statusIndicator.className = 'status-indicator status-disabled';
+                statusText.textContent = 'Disabled';
+            } else {
+                statusIndicator.className = 'status-indicator status-offline';
+                statusText.textContent = 'Offline';
+            }
+            this.clearPrinterInfo(printer.id);
+        }
+    }
+
+    async fetchPrinterStatus(printer) {
+        // This method is kept for initial status fetch if needed
+        // WebSocket subscriptions will handle real-time updates
+        return { online: false };
     }
 
     getHostFromIp(ip) {
@@ -360,102 +538,19 @@ class KlipperDashboard {
     }
 
     async updatePrinterStatus(printer) {
-        const result = await this.fetchPrinterStatus(printer);
-        
-        const statusIndicator = document.getElementById(`status-${printer.id}`);
-        const statusText = document.getElementById(`status-text-${printer.id}`);
-        
-        if (!statusIndicator || !statusText) return;
-
-        if (printer.disabled || !result.online) {
-            statusIndicator.className = `status-indicator ${printer.disabled ? 'status-disabled' : 'status-offline'}`;
-            statusText.textContent = printer.disabled ? 'Disabled' : 'Offline';
-            this.clearPrinterInfo(printer.id);
-            // Add/Remove disabled class on card
-            const card = statusIndicator.closest('.printer-card');
+        // For disabled printers, just update the UI status
+        if (printer.disabled) {
+            this.updatePrinterOfflineStatus(printer);
+            const card = document.getElementById(`status-${printer.id}`)?.closest('.printer-card');
             if (card) {
-                card.classList.toggle('disabled', !!printer.disabled);
+                card.classList.add('disabled');
             }
             return;
         }
-
-        // Update status based on print state
-        let currentState = 'idle';
-        let progress = 0;
-        if (result.print && result.print.result && result.print.result.status) {
-            const printStats = result.print.result.status.print_stats;
-            const displayStatus = result.print.result.status.display_status;
-
-            if (printStats) {
-                currentState = printStats.state || 'idle';
-                
-                // Calculate progress based on print_duration / total_duration
-                if (printStats.print_duration && printStats.total_duration) {
-                    const totalDuration = printStats.print_duration + (printStats.total_duration * (1 - (displayStatus?.progress || 0)));
-                    progress = printStats.print_duration / totalDuration;
-                    // Ensure progress doesn't exceed 1.0
-                    progress = Math.min(progress, 1.0);
-                } else {
-                    // Fallback to display status progress if duration data unavailable
-                    progress = displayStatus?.progress || 0;
-                }
-                
-                // Update print information
-                document.getElementById(`file-${printer.id}`).textContent = 
-                    printStats.filename || '-';
-                document.getElementById(`progress-${printer.id}`).textContent = 
-                    `${Math.round(progress * 100)}%`;
-                document.getElementById(`progress-bar-${printer.id}`).style.width = 
-                    `${progress * 100}%`;
-                
-                if (printStats.print_duration) {
-                    const printTime = this.formatTime(printStats.print_duration);
-                    document.getElementById(`print-time-${printer.id}`).textContent = printTime;
-                }
-                
-                if (printStats.total_duration && progress > 0) {
-                    const remaining = printStats.total_duration * (1 - progress);
-                    const eta = new Date(Date.now() + remaining * 1000);
-                    document.getElementById(`eta-${printer.id}`).textContent = 
-                        eta.toLocaleTimeString();
-                } else {
-                    document.getElementById(`eta-${printer.id}`).textContent = '-';
-                }
-            }
-            
-            // Update temperatures
-            const heaterBed = result.print.result.status.heater_bed;
-            const extruder = result.print.result.status.extruder;
-            
-            if (heaterBed) {
-                document.getElementById(`bed-temp-${printer.id}`).textContent = 
-                    `${Math.round(heaterBed.temperature)}°C / ${Math.round(heaterBed.target)}°C`;
-            }
-            
-            if (extruder) {
-                document.getElementById(`extruder-temp-${printer.id}`).textContent = 
-                    `${Math.round(extruder.temperature)}°C / ${Math.round(extruder.target)}°C`;
-            }
-        }
-
-        // Update status indicator and text
-        switch (currentState) {
-            case 'printing':
-                statusIndicator.className = 'status-indicator status-printing';
-                statusText.textContent = 'Printing';
-                break;
-            case 'complete':
-                statusIndicator.className = 'status-indicator status-complete';
-                statusText.textContent = 'Complete';
-                this.checkForPrintCompletion(printer, currentState);
-                break;
-            case 'paused':
-                statusIndicator.className = 'status-indicator status-printing';
-                statusText.textContent = 'Paused';
-                break;
-            default:
-                statusIndicator.className = 'status-indicator status-online';
-                statusText.textContent = 'Ready';
+        
+        // For enabled printers, ensure WebSocket connection exists
+        if (!this.websockets.has(printer.id)) {
+            this.connectWebSocket(printer);
         }
     }
 
@@ -506,30 +601,35 @@ class KlipperDashboard {
     }
 
     async updateAllPrinterStatus() {
-        const promises = this.printers
-            .filter(printer => !printer.disabled)
-            .map(printer => this.updatePrinterStatus(printer));
-        await Promise.all(promises);
-        // Also refresh the UI for disabled printers to ensure their disabled state is shown
-        this.printers.filter(p => p.disabled).forEach(p => this.updatePrinterStatus(p));
+        // Connect WebSockets for all enabled printers
+        this.printers.forEach(printer => {
+            this.updatePrinterStatus(printer);
+        });
     }
 
-    startPolling() {
-        this.stopPolling();
-        this.pollTimer = setInterval(() => {
-            this.updateAllPrinterStatus();
-        }, this.pollInterval * 1000);
+    startWebSocketConnections() {
+        this.stopWebSocketConnections();
+        this.updateAllPrinterStatus();
     }
 
-    stopPolling() {
-        if (this.pollTimer) {
-            clearInterval(this.pollTimer);
-            this.pollTimer = null;
-        }
+    stopWebSocketConnections() {
+        // Close all WebSocket connections
+        this.websockets.forEach((ws, printerId) => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        });
+        this.websockets.clear();
+        
+        // Clear all reconnection timers
+        this.reconnectTimers.forEach((timer) => {
+            clearTimeout(timer);
+        });
+        this.reconnectTimers.clear();
     }
 
-    restartPolling() {
-        this.startPolling();
+    restartWebSocketConnections() {
+        this.startWebSocketConnections();
     }
 }
 
@@ -539,13 +639,13 @@ document.addEventListener('DOMContentLoaded', () => {
     dashboard = new KlipperDashboard();
 });
 
-// Handle page visibility change to pause/resume polling
+// Handle page visibility change to pause/resume WebSocket connections
 document.addEventListener('visibilitychange', () => {
     if (dashboard) {
         if (document.hidden) {
-            dashboard.stopPolling();
+            dashboard.stopWebSocketConnections();
         } else {
-            dashboard.startPolling();
+            dashboard.startWebSocketConnections();
         }
     }
 });
