@@ -7,6 +7,7 @@ class KlipperDashboard {
         this.notificationsEnabled = false;
         this.websockets = new Map(); // Store WebSocket connections for each printer
         this.reconnectTimers = new Map(); // Store reconnection timers
+        this.printerCache = new Map(); // Cache printer data to merge updates
         
         // Migrate any legacy data formats/URLs before proceeding
         this.migrateLegacyWebcamUrls();
@@ -368,6 +369,8 @@ class KlipperDashboard {
                     // Handle subscription updates
                     if (data.method === 'notify_status_update' && data.params) {
                         this.handleStatusUpdate(printer, data.params[0]);
+                    } else if(data.result) {
+                      this.handleStatusUpdate(printer, data.result.status);
                     }
                 } catch (error) {
                     console.error(`Error parsing WebSocket message for ${printer.name}:`, error);
@@ -399,6 +402,28 @@ class KlipperDashboard {
         }
     }
 
+    deepMerge(target, source) {
+        // Deep merge function to merge objects recursively
+        if (!source || typeof source !== 'object') return target;
+        if (!target || typeof target !== 'object') return source;
+        
+        const result = { ...target };
+        
+        for (const key in source) {
+            if (source.hasOwnProperty(key)) {
+                if (source[key] !== null && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                    // Recursively merge nested objects
+                    result[key] = this.deepMerge(result[key] || {}, source[key]);
+                } else {
+                    // Direct assignment for primitive values, arrays, or null
+                    result[key] = source[key];
+                }
+            }
+        }
+        
+        return result;
+    }
+
     scheduleReconnect(printer) {
         // Clear existing timer
         const existingTimer = this.reconnectTimers.get(printer.id);
@@ -421,11 +446,41 @@ class KlipperDashboard {
         // Update status based on received data
         let currentState = 'idle';
 
-        const printStats = statusData.print_stats;
-        const displayStatus = statusData.display_status;
-        const virtualSdcard = statusData.virtual_sdcard;
-        const heaterBed = statusData.heater_bed;
-        const extruder = statusData.extruder;
+        // Get or initialize cached data for this printer
+        let cachedData = this.printerCache.get(printer.id) || {
+            print_stats: {},
+            display_status: {},
+            virtual_sdcard: {},
+            heater_bed: {},
+            extruder: {}
+        };
+
+        // Deep merge new data with cached data (only update provided values)
+        if (statusData.print_stats) {
+            cachedData.print_stats = this.deepMerge(cachedData.print_stats, statusData.print_stats);
+        }
+        if (statusData.display_status) {
+            cachedData.display_status = this.deepMerge(cachedData.display_status, statusData.display_status);
+        }
+        if (statusData.virtual_sdcard) {
+            cachedData.virtual_sdcard = this.deepMerge(cachedData.virtual_sdcard, statusData.virtual_sdcard);
+        }
+        if (statusData.heater_bed) {
+            cachedData.heater_bed = this.deepMerge(cachedData.heater_bed, statusData.heater_bed);
+        }
+        if (statusData.extruder) {
+            cachedData.extruder = this.deepMerge(cachedData.extruder, statusData.extruder);
+        }
+
+        // Update cache
+        this.printerCache.set(printer.id, cachedData);
+
+        // Use cached data for processing
+        const printStats = cachedData.print_stats;
+        const displayStatus = cachedData.display_status;
+        const virtualSdcard = cachedData.virtual_sdcard;
+        const heaterBed = cachedData.heater_bed;
+        const extruder = cachedData.extruder;
         
         if (printStats) {
             currentState = printStats.state || 'idle';
@@ -462,7 +517,7 @@ class KlipperDashboard {
         
         // Update temperatures
         if (heaterBed) {
-            document.getElementById(`bed-temp-${printer.id}`).textContent = 
+            document.getElementById(`bed-temp-${printer.id}`).textContent =
                 `${Math.round(heaterBed.temperature)}°C / ${Math.round(heaterBed.target)}°C`;
         }
         
