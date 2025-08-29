@@ -55,7 +55,7 @@ class KlipperDashboard {
                 { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108:4408', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
                 { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130:4408', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false },
                 { id: 3, name: 'Nami', ip: '10.0.68.121:4408', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
-                { id: 4, name: 'Usopp', ip: '10.0.68.117:4408', webcamUrl: 'http://10.0.68.117:4408/webcam/?action=stream', disabled: false },
+                { id: 4, name: 'Usopp', ip: '10.0.68.116:4408', webcamUrl: 'http://10.0.68.116:4408/webcam/?action=stream', disabled: false },
                 { id: 5, name: 'Sanji', ip: '10.0.68.124:4408', webcamUrl: 'http://10.0.68.124:4408/webcam/?action=stream', disabled: false }
             ];
             this.printers = defaultPrinters;
@@ -382,14 +382,23 @@ class KlipperDashboard {
         // Update status based on print state
         let currentState = 'idle';
         let progress = 0;
-        
         if (result.print && result.print.result && result.print.result.status) {
             const printStats = result.print.result.status.print_stats;
             const displayStatus = result.print.result.status.display_status;
-            
+
             if (printStats) {
                 currentState = printStats.state || 'idle';
-                progress = displayStatus?.progress || 0;
+                
+                // Calculate progress based on print_duration / total_duration
+                if (printStats.print_duration && printStats.total_duration) {
+                    const totalDuration = printStats.print_duration + (printStats.total_duration * (1 - (displayStatus?.progress || 0)));
+                    progress = printStats.print_duration / totalDuration;
+                    // Ensure progress doesn't exceed 1.0
+                    progress = Math.min(progress, 1.0);
+                } else {
+                    // Fallback to display status progress if duration data unavailable
+                    progress = displayStatus?.progress || 0;
+                }
                 
                 // Update print information
                 document.getElementById(`file-${printer.id}`).textContent = 
@@ -404,8 +413,8 @@ class KlipperDashboard {
                     document.getElementById(`print-time-${printer.id}`).textContent = printTime;
                 }
                 
-                if (printStats.estimated_time && progress > 0) {
-                    const remaining = printStats.estimated_time * (1 - progress);
+                if (printStats.total_duration && progress > 0) {
+                    const remaining = printStats.total_duration * (1 - progress);
                     const eta = new Date(Date.now() + remaining * 1000);
                     document.getElementById(`eta-${printer.id}`).textContent = 
                         eta.toLocaleTimeString();
