@@ -68,7 +68,7 @@ class KlipperDashboard {
 
     init() {
         this.setupEventListeners();
-        this.requestNotificationPermission();
+        this.updateNotificationButton();
         this.renderPrinters();
         this.startWebSocketConnections();
         
@@ -81,6 +81,14 @@ class KlipperDashboard {
         document.getElementById('addPrinter').addEventListener('click', () => {
             document.getElementById('addPrinterModal').style.display = 'block';
         });
+
+        // Enable notifications button
+        const enableBtn = document.getElementById('enableNotifications');
+        if (enableBtn) {
+            enableBtn.addEventListener('click', () => {
+                this.requestNotificationPermission();
+            });
+        }
 
         // Test notification button
         const testBtn = document.getElementById('testNotification');
@@ -118,9 +126,57 @@ class KlipperDashboard {
     }
 
     async requestNotificationPermission() {
-        if ('Notification' in window) {
+        if (!('Notification' in window)) {
+            alert('This browser does not support desktop notifications');
+            return;
+        }
+
+        try {
             const permission = await Notification.requestPermission();
             this.notificationsEnabled = permission === 'granted';
+            this.updateNotificationButton();
+            
+            if (permission === 'granted') {
+                this.showNotification('Notifications Enabled', 'You will now receive print completion notifications!');
+            } else if (permission === 'denied') {
+                alert('Notifications have been blocked. To enable them:\n\n1. Click the lock icon in your address bar\n2. Set Notifications to "Allow"\n3. Refresh the page');
+            }
+        } catch (error) {
+            console.error('Error requesting notification permission:', error);
+            alert('Failed to request notification permission. Please try again.');
+        }
+    }
+
+    updateNotificationButton() {
+        const enableBtn = document.getElementById('enableNotifications');
+        if (!enableBtn) return;
+
+        if (!('Notification' in window)) {
+            enableBtn.textContent = 'Notifications Not Supported';
+            enableBtn.disabled = true;
+            enableBtn.className = 'notification-btn disabled';
+            return;
+        }
+
+        const permission = Notification.permission;
+        switch (permission) {
+            case 'granted':
+                enableBtn.textContent = '✓ Notifications Enabled';
+                enableBtn.disabled = true;
+                enableBtn.className = 'notification-btn enabled';
+                this.notificationsEnabled = true;
+                break;
+            case 'denied':
+                enableBtn.textContent = '✗ Notifications Blocked';
+                enableBtn.disabled = false;
+                enableBtn.className = 'notification-btn blocked';
+                this.notificationsEnabled = false;
+                break;
+            default: // 'default'
+                enableBtn.textContent = 'Enable Notifications';
+                enableBtn.disabled = false;
+                enableBtn.className = 'notification-btn';
+                this.notificationsEnabled = false;
         }
     }
 
@@ -128,20 +184,13 @@ class KlipperDashboard {
         try {
             if (!('Notification' in window)) {
                 // Desktop notifications not supported; fallback
-                alert(`${title}: ${body}`);
+                console.log(`Notification: ${title} - ${body}`);
                 return;
             }
 
             const permission = Notification.permission;
             if (permission !== 'granted') {
-                // Request permission, then retry if granted
-                this.requestNotificationPermission().then(() => {
-                    if (this.notificationsEnabled) {
-                        this.showNotification(title, body, options);
-                    } else {
-                        alert(`${title}: ${body}`);
-                    }
-                });
+                console.log(`Notification blocked: ${title} - ${body}`);
                 return;
             }
 
@@ -166,10 +215,7 @@ class KlipperDashboard {
             };
         } catch (e) {
             // Fallback if notifications fail for any reason
-            if (typeof window !== 'undefined' && window.DEBUG_DASHBOARD) {
-                console.warn('Notification failed, falling back to alert:', e);
-            }
-            alert(`${title}: ${body}`);
+            console.error('Notification failed:', e);
         }
     }
 

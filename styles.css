@@ -67,6 +67,37 @@ button:active {
     transform: translateY(1px);
 }
 
+/* Notification Button Styles */
+.notification-btn {
+    background: #3498db;
+    position: relative;
+}
+
+.notification-btn.enabled {
+    background: #27ae60;
+}
+
+.notification-btn.enabled:hover {
+    background: #229954;
+}
+
+.notification-btn.blocked {
+    background: #e74c3c;
+}
+
+.notification-btn.blocked:hover {
+    background: #c0392b;
+}
+
+.notification-btn.disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+}
+
+.notification-btn.disabled:hover {
+    background: #95a5a6;
+}
+
 input[type="number"], input[type="text"] {
     padding: 8px 12px;
     border: 1px solid #ddd;
