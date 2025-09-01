@@ -55,11 +55,11 @@ class KlipperDashboard {
         if (this.printers.length === 0) {
             // Add default printers from the issue description
             const defaultPrinters = [
-                { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108:4408', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
-                { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130:4408', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false },
-                { id: 3, name: 'Nami', ip: '10.0.68.121:4408', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
-                { id: 4, name: 'Usopp', ip: '10.0.68.116:4408', webcamUrl: 'http://10.0.68.116:4408/webcam/?action=stream', disabled: false },
-                { id: 5, name: 'Sanji', ip: '10.0.68.124:4408', webcamUrl: 'http://10.0.68.124:4408/webcam/?action=stream', disabled: false }
+                { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
+                { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false },
+                { id: 3, name: 'Nami', ip: '10.0.68.121', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
+                { id: 4, name: 'Usopp', ip: '10.0.68.116', webcamUrl: 'http://10.0.68.116:4408/webcam/?action=stream', disabled: false },
+                { id: 5, name: 'Sanji', ip: '10.0.68.124', webcamUrl: 'http://10.0.68.124:4408/webcam/?action=stream', disabled: false }
             ];
             this.printers = defaultPrinters;
             this.savePrinters();
@@ -232,7 +232,7 @@ class KlipperDashboard {
         const newPrinter = {
             id: Date.now(),
             name: name,
-            ip: ip.startsWith('http') ? ip : `http://${ip}`,
+            ip: ip.replace(/^https?:\/\//, '').replace(/:4408$/, ''),
             webcamUrl: webcamUrl || null,
             disabled: false
         };
