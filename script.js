@@ -100,16 +100,25 @@ class KlipperDashboard {
             });
         }
 
-        // Close modal
-        document.querySelector('.close').addEventListener('click', () => {
-            document.getElementById('addPrinterModal').style.display = 'none';
+        // Close modals
+        document.querySelectorAll('.close').forEach(closeBtn => {
+            closeBtn.addEventListener('click', (e) => {
+                const modal = e.target.closest('.modal');
+                if (modal) {
+                    modal.style.display = 'none';
+                }
+            });
         });
 
         // Close modal when clicking outside
         window.addEventListener('click', (event) => {
-            const modal = document.getElementById('addPrinterModal');
-            if (event.target === modal) {
-                modal.style.display = 'none';
+            const addModal = document.getElementById('addPrinterModal');
+            const editModal = document.getElementById('editPrinterModal');
+            if (event.target === addModal) {
+                addModal.style.display = 'none';
+            }
+            if (event.target === editModal) {
+                editModal.style.display = 'none';
             }
         });
 
@@ -117,6 +126,12 @@ class KlipperDashboard {
         document.getElementById('addPrinterForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.addPrinter();
+        });
+
+        // Edit printer form
+        document.getElementById('editPrinterForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveEditedPrinter();
         });
 
         // Save settings
@@ -244,6 +259,74 @@ class KlipperDashboard {
         document.getElementById('addPrinterModal').style.display = 'none';
     }
 
+    editPrinter(id) {
+        const printer = this.printers.find(p => p.id === id);
+        if (!printer) return;
+        
+        // Populate the edit form with current values
+        document.getElementById('editPrinterName').value = printer.name;
+        document.getElementById('editPrinterIP').value = printer.ip;
+        
+        // Store the printer ID for saving later
+        this.editingPrinterId = id;
+        
+        // Show the edit modal
+        document.getElementById('editPrinterModal').style.display = 'block';
+    }
+
+    saveEditedPrinter() {
+        const name = document.getElementById('editPrinterName').value.trim();
+        const ip = document.getElementById('editPrinterIP').value.trim();
+        
+        if (!name || !ip) {
+            alert('Please fill in printer name and IP address');
+            return;
+        }
+        
+        const printerIndex = this.printers.findIndex(p => p.id === this.editingPrinterId);
+        if (printerIndex === -1) {
+            alert('Printer not found');
+            return;
+        }
+        
+        // Close existing WebSocket connection if IP changed
+        const oldPrinter = this.printers[printerIndex];
+        const ipChanged = oldPrinter.ip !== ip.replace(/^https?:\/\//, '').replace(/:4408$/, '');
+        
+        if (ipChanged) {
+            const ws = this.websockets.get(this.editingPrinterId);
+            if (ws) {
+                ws.close();
+            }
+            // Clear reconnection timer
+            const timer = this.reconnectTimers.get(this.editingPrinterId);
+            if (timer) {
+                clearTimeout(timer);
+                this.reconnectTimers.delete(this.editingPrinterId);
+            }
+        }
+        
+        // Update the printer
+        this.printers[printerIndex] = {
+            ...this.printers[printerIndex],
+            name: name,
+            ip: ip.replace(/^https?:\/\//, '').replace(/:4408$/, '')
+        };
+        
+        this.savePrinters();
+        this.renderPrinters();
+        
+        // Reconnect WebSocket if IP changed and printer is enabled
+        if (ipChanged && !this.printers[printerIndex].disabled) {
+            this.connectWebSocket(this.printers[printerIndex]);
+        }
+        
+        // Reset form and close modal
+        document.getElementById('editPrinterForm').reset();
+        document.getElementById('editPrinterModal').style.display = 'none';
+        this.editingPrinterId = null;
+    }
+
     removePrinter(id) {
         if (confirm('Are you sure you want to remove this printer?')) {
             this.printers = this.printers.filter(printer => printer.id !== id);
@@ -313,6 +396,7 @@ class KlipperDashboard {
         card.className = 'printer-card';
         card.innerHTML = `
             <button class="remove-printer" onclick="dashboard.removePrinter(${printer.id})" title="Remove Printer">×</button>
+            <button class="edit-printer" onclick="dashboard.editPrinter(${printer.id})" title="Edit Printer">✏️</button>
             <button class="disable-printer" onclick="dashboard.togglePrinterDisabled(${printer.id})" title="${printer.disabled ? 'Enable' : 'Disable'} Printer">${printer.disabled ? '⏻' : '⏸'}</button>
             <div class="printer-header">
                 <div class="printer-name">${printer.name} <span class="printer-ip">(${printer.ip.replace(/^https?:\/\//, '')})</span></div>
