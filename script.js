@@ -55,11 +55,11 @@ class KlipperDashboard {
         if (this.printers.length === 0) {
             // Add default printers from the issue description
             const defaultPrinters = [
-                { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108', webcamUrl: 'http://10.0.68.108:4408/webcam/?action=stream', disabled: false },
-                { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130', webcamUrl: 'http://10.0.68.130:4408/webcam/?action=stream', disabled: false },
-                { id: 3, name: 'Nami', ip: '10.0.68.121', webcamUrl: 'http://10.0.68.121:4408/webcam/?action=stream', disabled: false },
-                { id: 4, name: 'Usopp', ip: '10.0.68.116', webcamUrl: 'http://10.0.68.116:4408/webcam/?action=stream', disabled: false },
-                { id: 5, name: 'Sanji', ip: '10.0.68.124', webcamUrl: 'http://10.0.68.124:4408/webcam/?action=stream', disabled: false }
+                { id: 1, name: 'Mokey D. Luffy', ip: '10.0.68.108', disabled: false },
+                { id: 2, name: 'Roronoa Zoro', ip: '10.0.68.130', disabled: false },
+                { id: 3, name: 'Nami', ip: '10.0.68.121', disabled: false },
+                { id: 4, name: 'Usopp', ip: '10.0.68.116', disabled: false },
+                { id: 5, name: 'Sanji', ip: '10.0.68.124', disabled: false }
             ];
             this.printers = defaultPrinters;
             this.savePrinters();
@@ -222,7 +222,6 @@ class KlipperDashboard {
     addPrinter() {
         const name = document.getElementById('printerName').value.trim();
         const ip = document.getElementById('printerIP').value.trim();
-        const webcamUrl = document.getElementById('webcamUrl').value.trim();
 
         if (!name || !ip) {
             alert('Please fill in printer name and IP address');
@@ -233,7 +232,6 @@ class KlipperDashboard {
             id: Date.now(),
             name: name,
             ip: ip.replace(/^https?:\/\//, '').replace(/:4408$/, ''),
-            webcamUrl: webcamUrl || null,
             disabled: false
         };
 
@@ -352,15 +350,13 @@ class KlipperDashboard {
                     <div class="info-value" id="eta-${printer.id}">-</div>
                 </div>
             </div>
-            ${printer.webcamUrl ? `
-                <div class="webcam-container">
-                    <img class="webcam-stream" src="${printer.webcamUrl}" alt="Webcam feed" 
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="webcam-error" style="display: none;">
-                        Webcam unavailable
-                    </div>
+            <div class="webcam-container">
+                <img class="webcam-stream" src="${this.getWebcamUrl(printer.ip)}" alt="Webcam feed" 
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="webcam-error" style="display: none;">
+                    Webcam unavailable
                 </div>
-            ` : ''}
+            </div>
         `;
         if (printer.disabled) {
             card.classList.add('disabled');
@@ -628,6 +624,11 @@ class KlipperDashboard {
         } catch (_) {
             return String(ip);
         }
+    }
+
+    getWebcamUrl(ip) {
+        const host = this.getHostFromIp(ip);
+        return `http://${host}:4408/webcam/?action=stream`;
     }
 
     getMoonrakerProxyEndpoint(printerIp) {
